@@ -80,7 +80,29 @@ npm test
 npx hardhat node
 
 # Deploy contracts
-npx hardhat run scripts/deploy.js
+npx hardhat run scripts/deploy.js --network <network-name>
+```
+
+### Scripts
+
+#### 1. Deployment (`scripts/deploy.js`)
+Deploys the token and vesting contracts, and sets up initial vesting schedules:
+```bash
+npx hardhat run scripts/deploy.js --network <network-name>
+```
+
+#### 2. Add Vesting (`scripts/add-vesting.js`)
+Adds new vesting schedules after deployment. Supports both single and batch additions:
+```bash
+# Update the script with your vesting contract address and schedule details
+npx hardhat run scripts/add-vesting.js --network <network-name>
+```
+
+#### 3. Manage Vesting (`scripts/manage-vesting.js`)
+Manages existing vesting schedules, check status, and release tokens:
+```bash
+# Update the script with your contract addresses
+npx hardhat run scripts/manage-vesting.js --network <network-name>
 ```
 
 ### Testing
