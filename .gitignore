@@ -1,0 +1,54 @@
+# Node.js dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Hardhat files
+cache/
+artifacts/
+typechain/
+typechain-types/
+
+# Test coverage
+coverage/
+coverage.json
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Debug logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+build/
+
+# Hardhat deployment files
+deployments/
+
+# Gas reporter output
+gas-report.txt
+
+# Solidity coverage
+.coverage_artifacts/
+.coverage_cache/
+.coverage_contracts/
+
+# Mac OS system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
