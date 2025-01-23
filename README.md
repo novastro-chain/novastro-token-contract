@@ -1,121 +1,114 @@
-# NOVASTRO Token Contract
+# Novastro Token Contracts
 
-This repository contains the smart contracts for the NOVASTRO token and its vesting mechanism. The NOVASTRO token is an ERC20 token with a total supply of 1 billion tokens, implementing a sophisticated vesting schedule for various token allocations.
+This repository contains the smart contracts for the NOVASTRO (NOVAS) token and its vesting mechanism.
+
+## Overview
+
+- **Token Name**: NOVASTRO
+- **Symbol**: NOVAS
+- **Total Supply**: 1,000,000,000 (1 billion) tokens
+- **Decimals**: 18
+
+## Features
+
+### Token Distribution
+- **Seed Round**: 7% (70M tokens) - 0% TGE, 3 months cliff, 18 months vesting
+- **Team**: 7.5% (75M tokens) - 0% TGE, 12 months cliff, 24 months vesting
+- **Marketing**: 14% (140M tokens) - 22.5% TGE, no cliff, 24 months vesting
+- **Development**: 14% (140M tokens) - 22.5% TGE, no cliff, 36 months vesting
+- **Ecosystem**: 17.5% (175M tokens) - 22.5% TGE, no cliff, 48 months vesting
+- **Treasury**: 15% (150M tokens) - 0% TGE, no cliff, 36 months vesting
+- **Airdrop**: 15% (150M tokens) - 100% TGE
+- **Liquidity**: 5% (50M tokens) - 100% TGE
+- **Advisors**: 5% (50M tokens) - 0% TGE, 10 months cliff, 12 months vesting
+
+### Cross-Chain Support
+The token now supports cross-chain transfers through Wormhole's Native Token Transfer (NTT) protocol, enabling:
+- Seamless token transfers between supported blockchains
+- Automatic token bridging with consistent supply across chains
+- Secure bridge operations with role-based access control
 
 ## Contracts
 
-### NovastroToken.sol
-- ERC20 token implementation
-- Symbol: NOVAS
-- Total Supply: 1,000,000,000 tokens
-- Features: Token burning capability
+1. **NovastroToken.sol**: ERC20 token contract with:
+   - Role-based access control
+   - Cross-chain transfer capabilities via Wormhole
+   - Bridge operations for token minting/burning
 
-### TokenVesting.sol
-- Manages token vesting schedules for different allocations
-- Supports TGE (Token Generation Event) releases
-- Configurable cliff periods and linear vesting
-- Secure release mechanism
+2. **TokenVesting.sol**: Vesting contract with:
+   - Linear vesting schedule support
+   - Cliff periods
+   - TGE (Token Generation Event) releases
+   - Multiple beneficiary support
 
-## Token Allocations
+3. **MockWormhole.sol**: Mock contract for testing Wormhole integration
 
-The token distribution includes various allocations with different vesting schedules:
-
-1. **Seed Round (70M tokens)**
-   - 0% TGE
-   - 3 months cliff
-   - 18 months linear vesting
-
-2. **Team (75M tokens)**
-   - 0% TGE
-   - 12 months cliff
-   - 24 months linear vesting
-
-3. **Marketing (140M tokens)**
-   - 22.5% TGE
-   - No cliff
-   - 24 months linear vesting
-
-4. **Development (140M tokens)**
-   - 22.5% TGE
-   - No cliff
-   - 36 months linear vesting
-
-5. **Ecosystem Rewards & Staking (175M tokens)**
-   - 22.5% TGE
-   - No cliff
-   - 48 months linear vesting
-
-6. **Treasury (150M tokens)**
-   - 0% TGE
-   - 12 months cliff
-   - 36 months linear vesting
-
-7. **Airdrop (150M tokens)**
-   - 100% at TGE
-
-8. **Liquidity (50M tokens)**
-   - 100% at TGE
-
-9. **Advisors (50M tokens)**
-   - 0% TGE
-   - 10 months cliff
-   - 12 months linear vesting
-
-## Development
+## Deployment
 
 ### Prerequisites
-- Node.js
-- npm or yarn
-- Hardhat
-
-### Setup
 ```bash
-# Install dependencies
 npm install
-
-# Run tests
-npm test
-
-# Run hardhat local network
-npx hardhat node
-
-# Deploy contracts
-npx hardhat run scripts/deploy.js --network <network-name>
 ```
 
-### Scripts
-
-#### 1. Deployment (`scripts/deploy.js`)
-Deploys the token and vesting contracts, and sets up initial vesting schedules:
+### Deploy to Different Networks
 ```bash
-npx hardhat run scripts/deploy.js --network <network-name>
+# Deploy to Ethereum Mainnet
+npx hardhat run scripts/deploy-with-wormhole.js --network ethereum
+
+# Deploy to Polygon
+npx hardhat run scripts/deploy-with-wormhole.js --network polygon
+
+# Deploy to BSC
+npx hardhat run scripts/deploy-with-wormhole.js --network bsc
+
+# Deploy to Avalanche
+npx hardhat run scripts/deploy-with-wormhole.js --network avalanche
 ```
 
-#### 2. Add Vesting (`scripts/add-vesting.js`)
-Adds new vesting schedules after deployment. Supports both single and batch additions:
+### Create Vesting Schedules
 ```bash
-# Update the script with your vesting contract address and schedule details
-npx hardhat run scripts/add-vesting.js --network <network-name>
+npx hardhat run scripts/add-vesting.js --network <network>
 ```
 
-#### 3. Manage Vesting (`scripts/manage-vesting.js`)
-Manages existing vesting schedules, check status, and release tokens:
+## Testing
 ```bash
-# Update the script with your contract addresses
-npx hardhat run scripts/manage-vesting.js --network <network-name>
-```
-
-### Testing
-The project includes comprehensive test coverage for all vesting scenarios and edge cases. Run the tests using:
-```bash
+# Run all tests
 npx hardhat test
+
+# Run specific test file
+npx hardhat test test/NovastroToken.test.js
+npx hardhat test test/NovastroToken.wormhole.test.js
 ```
+
+## Cross-Chain Operations
+
+### Bridge Tokens
+To bridge tokens to another chain:
+```solidity
+// Amount in wei (18 decimals)
+uint256 amount = 1000000000000000000; // 1 NOVAS
+uint16 targetChain = 5; // Polygon chain ID in Wormhole
+
+// Bridge tokens
+await novastroToken.bridgeTokens(amount, targetChain, { value: wormholeFee });
+```
+
+### Supported Networks
+- Ethereum (Chain ID: 2)
+- BSC (Chain ID: 4)
+- Polygon (Chain ID: 5)
+- Avalanche (Chain ID: 6)
+- Optimism (Chain ID: 24)
+- Arbitrum (Chain ID: 23)
+- Base (Chain ID: 30)
 
 ## Security
-- Owner-only vesting schedule creation
-- Protection against double vesting
-- Safe math operations using Solidity 0.8.20
-- Built on proven OpenZeppelin contracts
+
+The contracts use OpenZeppelin's battle-tested implementations for:
+- ERC20 token standard
+- Access Control
+- Safe math operations
 
 ## License
-MIT License
+
+MIT

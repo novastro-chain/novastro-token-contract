@@ -7,6 +7,7 @@ describe("Novastro Token and Vesting", function () {
     let vesting;
     let owner;
     let seed, team, marketing, dev, ecosystem, treasury, liquidity, airdrop, advisors;
+    let mockWormhole;
 
     const ALLOCATIONS = {
         SEED: {
@@ -68,10 +69,14 @@ describe("Novastro Token and Vesting", function () {
     beforeEach(async function () {
         [owner, seed, team, marketing, dev, ecosystem, treasury, liquidity, airdrop, advisors] = await ethers.getSigners();
 
-        const NovastroTokenFactory = await ethers.getContractFactory("NovastroToken", owner);
-        token = await NovastroTokenFactory.deploy();
+        // Deploy mock Wormhole
+        const MockWormhole = await ethers.getContractFactory("MockWormhole");
+        mockWormhole = await MockWormhole.deploy();
 
-        const TokenVestingFactory = await ethers.getContractFactory("TokenVesting", owner);
+        const NovastroTokenFactory = await ethers.getContractFactory("NovastroToken");
+        token = await NovastroTokenFactory.deploy(await mockWormhole.getAddress(), 2); // 2 is Ethereum chain ID in Wormhole
+
+        const TokenVestingFactory = await ethers.getContractFactory("TokenVesting");
         vesting = await TokenVestingFactory.deploy(await token.getAddress());
     });
 
@@ -262,10 +267,10 @@ describe("Novastro Token and Vesting", function () {
         describe("Edge Cases and Security", function () {
             beforeEach(async function () {
                 // Deploy fresh contracts for these tests
-                const NovastroTokenFactory = await ethers.getContractFactory("NovastroToken", owner);
-                token = await NovastroTokenFactory.deploy();
+                const NovastroTokenFactory = await ethers.getContractFactory("NovastroToken");
+                token = await NovastroTokenFactory.deploy(await mockWormhole.getAddress(), 2); // 2 is Ethereum chain ID in Wormhole
 
-                const TokenVestingFactory = await ethers.getContractFactory("TokenVesting", owner);
+                const TokenVestingFactory = await ethers.getContractFactory("TokenVesting");
                 vesting = await TokenVestingFactory.deploy(await token.getAddress());
             });
 
