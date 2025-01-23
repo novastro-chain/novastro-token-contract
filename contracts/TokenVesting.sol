@@ -6,8 +6,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract TokenVesting is Ownable {
     struct VestingSchedule {
+        address beneficiary;
         uint256 totalAmount;
-        uint256 tgeAmount;
+        uint256 tgePercentage;
         uint256 cliffDuration;
         uint256 vestingDuration;
         uint256 startTime;
@@ -15,51 +16,54 @@ contract TokenVesting is Ownable {
         bool initialized;
     }
 
-    IERC20 public token;
+    IERC20 public immutable token;  // Fixed order of modifiers
     
     // Mapping from beneficiary address to vesting schedule
     mapping(address => VestingSchedule) public vestingSchedules;
-
-    event TokensReleased(address beneficiary, uint256 amount);
-    event VestingScheduleCreated(address beneficiary, uint256 totalAmount);
-
+    
+    event VestingScheduleCreated(address indexed beneficiary, uint256 totalAmount, uint256 tgePercentage);
+    event TokensReleased(address indexed beneficiary, uint256 amount);
+    
     constructor(address _token) Ownable(msg.sender) {
         require(_token != address(0), "Token address cannot be 0");
         token = IERC20(_token);
     }
-
+    
     function createVestingSchedule(
         address _beneficiary,
         uint256 _totalAmount,
-        uint256 _tgePercentage, // Percentage * 10 (e.g., 225 for 22.5%)
-        uint256 _cliffMonths,
-        uint256 _vestingMonths
+        uint256 _tgePercentage,
+        uint256 _cliffDuration,
+        uint256 _vestingDuration
     ) external onlyOwner {
         require(_beneficiary != address(0), "Beneficiary address cannot be 0");
         require(_totalAmount > 0, "Total amount must be greater than 0");
         require(!vestingSchedules[_beneficiary].initialized, "Vesting schedule already exists");
+        require(_tgePercentage <= 1000, "TGE percentage must be less than or equal to 100%");
+        require(_vestingDuration > 0 || _tgePercentage == 1000, "Vesting duration must be greater than 0");
 
-        uint256 tgeAmount = (_totalAmount * _tgePercentage) / 1000; // Divide by 1000 since percentage is multiplied by 10
-        uint256 cliffDuration = _cliffMonths * 30 days;
-        uint256 vestingDuration = _vestingMonths * 30 days;
+        uint256 tgeAmount = (_totalAmount * _tgePercentage) / 1000;
+
+        // Check if contract has enough balance
+        require(IERC20(token).balanceOf(address(this)) >= _totalAmount, "Insufficient balance");
 
         vestingSchedules[_beneficiary] = VestingSchedule({
+            initialized: true,
+            beneficiary: _beneficiary,
             totalAmount: _totalAmount,
-            tgeAmount: tgeAmount,
-            cliffDuration: cliffDuration,
-            vestingDuration: vestingDuration,
+            tgePercentage: _tgePercentage,
             startTime: block.timestamp,
-            released: 0,
-            initialized: true
+            cliffDuration: _cliffDuration * 30 days,
+            vestingDuration: _vestingDuration * 30 days,
+            released: 0
         });
 
-        // Transfer TGE tokens immediately if any
         if (tgeAmount > 0) {
-            require(token.transfer(_beneficiary, tgeAmount), "Token transfer failed");
             vestingSchedules[_beneficiary].released = tgeAmount;
+            IERC20(token).transfer(_beneficiary, tgeAmount);
         }
 
-        emit VestingScheduleCreated(_beneficiary, _totalAmount);
+        emit VestingScheduleCreated(_beneficiary, _totalAmount, _tgePercentage);
     }
 
     function release(address _beneficiary) external {
@@ -70,7 +74,7 @@ contract TokenVesting is Ownable {
         require(releasable > 0, "No tokens are due for release");
 
         schedule.released += releasable;
-        require(token.transfer(_beneficiary, releasable), "Token transfer failed");
+        require(IERC20(token).transfer(_beneficiary, releasable), "Token transfer failed");
 
         emit TokensReleased(_beneficiary, releasable);
     }
@@ -79,23 +83,57 @@ contract TokenVesting is Ownable {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         if (!schedule.initialized) return 0;
 
-        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
-            return schedule.tgeAmount;
+        // Get TGE amount
+        uint256 tgeAmount = (schedule.totalAmount * schedule.tgePercentage) / 1000;
+
+        // If no vesting (100% TGE), return total amount
+        if (schedule.tgePercentage == 1000) {
+            return schedule.totalAmount;
         }
 
+        // During cliff period, only TGE amount is vested
+        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
+            return schedule.tgePercentage > 0 ? schedule.released : 0;
+        }
+
+        // After vesting period, all tokens are vested
         if (block.timestamp >= schedule.startTime + schedule.cliffDuration + schedule.vestingDuration) {
             return schedule.totalAmount;
         }
 
+        // During vesting period, calculate linear vesting
+        uint256 vestingAmount = schedule.totalAmount - tgeAmount;
         uint256 timeFromStart = block.timestamp - (schedule.startTime + schedule.cliffDuration);
-        uint256 vestedAmount = schedule.tgeAmount + 
-            ((schedule.totalAmount - schedule.tgeAmount) * timeFromStart) / schedule.vestingDuration;
+        uint256 vestedVestingAmount = (vestingAmount * timeFromStart) / schedule.vestingDuration;
 
-        return vestedAmount;
+        // Cap vested amount to total amount
+        uint256 totalVested = tgeAmount + vestedVestingAmount;
+        if (totalVested > schedule.totalAmount) {
+            return schedule.totalAmount;
+        }
+        return totalVested;
     }
 
     function _getReleasableAmount(address _beneficiary) private view returns (uint256) {
-        return getVestedAmount(_beneficiary) - vestingSchedules[_beneficiary].released;
+        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
+        if (!schedule.initialized) return 0;
+
+        // During cliff period, only TGE amount is releasable
+        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
+            if (schedule.tgePercentage == 0) {
+                return 0;
+            }
+            if (schedule.released >= (schedule.totalAmount * schedule.tgePercentage) / 1000) {
+                return 0;
+            }
+            return (schedule.totalAmount * schedule.tgePercentage) / 1000 - schedule.released;
+        }
+
+        uint256 vested = getVestedAmount(_beneficiary);
+        if (vested <= schedule.released) {
+            return 0;
+        }
+        return vested - schedule.released;
     }
 
     function getReleasableAmount(address _beneficiary) external view returns (uint256) {
