@@ -30,7 +30,6 @@ contract NovastroToken is ERC20, AccessControl {
         
         _mint(msg.sender, TOTAL_SUPPLY);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(BRIDGE_ROLE, msg.sender);
     }
 
     function bridgeTokens(uint256 amount, uint16 targetChain) external payable {
