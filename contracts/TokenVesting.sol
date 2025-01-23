@@ -8,7 +8,6 @@ contract TokenVesting is AccessControl {
     bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
     uint256 private constant MINIMUM_TRANSFER = 1000; // Minimum transfer amount
-    bool private _paused;
 
     struct VestingSchedule {
         address beneficiary;
@@ -29,13 +28,6 @@ contract TokenVesting is AccessControl {
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event EmergencyWithdraw(address indexed token, uint256 amount);
     event ERC20Recovered(address indexed token, address indexed to, uint256 amount);
-    event Paused(address account);
-    event Unpaused(address account);
-    
-    modifier whenNotPaused() {
-        require(!_paused, "Contract is paused");
-        _;
-    }
 
     constructor(address _token) {
         require(_token != address(0), "Token address cannot be 0");
@@ -51,7 +43,7 @@ contract TokenVesting is AccessControl {
         uint256 _tgePercentage,
         uint256 _cliffDuration,
         uint256 _vestingDuration
-    ) external whenNotPaused onlyRole(VESTING_MANAGER_ROLE) {
+    ) external onlyRole(VESTING_MANAGER_ROLE) {
         require(_beneficiary != address(0), "Beneficiary address cannot be 0");
         require(_totalAmount > MINIMUM_TRANSFER, "Amount too small");
         require(!vestingSchedules[_beneficiary].initialized, "Vesting schedule exists");
@@ -79,7 +71,7 @@ contract TokenVesting is AccessControl {
         emit VestingScheduleCreated(_beneficiary, _totalAmount, _tgePercentage);
     }
 
-    function release(address _beneficiary) external whenNotPaused {
+    function release(address _beneficiary) external {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.initialized, "No vesting schedule found");
 
@@ -103,18 +95,6 @@ contract TokenVesting is AccessControl {
         require(tokenAddress != address(token), "Cannot recover vesting token");
         IERC20(tokenAddress).transfer(msg.sender, amount);
         emit ERC20Recovered(tokenAddress, msg.sender, amount);
-    }
-
-    function pause() external onlyRole(EMERGENCY_ROLE) {
-        require(!_paused, "Already paused");
-        _paused = true;
-        emit Paused(msg.sender);
-    }
-
-    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_paused, "Not paused");
-        _paused = false;
-        emit Unpaused(msg.sender);
     }
 
     function getVestedAmount(address _beneficiary) public view returns (uint256) {
