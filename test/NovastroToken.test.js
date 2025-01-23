@@ -366,7 +366,7 @@ describe("Novastro Token and Vesting", function () {
             await expect(
                 token
                     .connect(bridge)
-                    .receiveTokens("0x", amount, recipient, sourceChain)
+                    .receiveTokens(amount, recipient, sourceChain)
             )
                 .to.emit(token, "TokensReceived")
                 .withArgs(recipient, amount, sourceChain);
@@ -385,7 +385,7 @@ describe("Novastro Token and Vesting", function () {
             await expect(
                 token
                     .connect(owner)
-                    .receiveTokens("0x", amount, owner.address, targetChain)
+                    .receiveTokens(amount, owner.address, targetChain)
             ).to.be.revertedWithCustomError(token, "AccessControlUnauthorizedAccount");
         });
     });

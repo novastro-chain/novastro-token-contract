@@ -57,7 +57,6 @@ contract NovastroToken is ERC20, AccessControl {
     }
 
     function receiveTokens(
-        bytes memory encodedVm,
         uint256 amount,
         address recipient,
         uint16 sourceChain
