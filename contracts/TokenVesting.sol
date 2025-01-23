@@ -6,10 +6,8 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract TokenVesting is AccessControl {
     bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
-    uint256 private constant MINIMUM_TRANSFER = 1000; // Minimum transfer amount
 
     struct VestingSchedule {
-        address beneficiary;
         uint256 totalAmount;
         uint256 tgePercentage;
         uint256 cliffDuration;
@@ -20,7 +18,6 @@ contract TokenVesting is AccessControl {
     }
 
     IERC20 public immutable token;
-    
     mapping(address => VestingSchedule) public vestingSchedules;
     
     event VestingScheduleCreated(address indexed beneficiary, uint256 totalAmount, uint256 tgePercentage);
@@ -40,25 +37,23 @@ contract TokenVesting is AccessControl {
         uint256 _cliffDuration,
         uint256 _vestingDuration
     ) external onlyRole(VESTING_MANAGER_ROLE) {
-        require(_beneficiary != address(0), "Beneficiary address cannot be 0");
-        require(_totalAmount > MINIMUM_TRANSFER, "Amount too small");
-        require(!vestingSchedules[_beneficiary].initialized, "Vesting schedule exists");
-        require(_tgePercentage <= 1000, "TGE percentage must be <= 100%");
-        require(_vestingDuration > 0 || _tgePercentage == 1000, "Invalid vesting duration");
-        require(_cliffDuration <= _vestingDuration, "Cliff longer than vesting");
+        require(_beneficiary != address(0), "Beneficiary cannot be 0");
+        require(!vestingSchedules[_beneficiary].initialized, "Schedule exists");
+        require(_tgePercentage <= 1000, "TGE percentage > 100%");
+        require(_vestingDuration > 0 || _tgePercentage == 1000, "Invalid duration");
+        require(_cliffDuration <= _vestingDuration, "Cliff > vesting");
 
         uint256 tgeAmount = (_totalAmount * _tgePercentage) / 1000;
         require(token.balanceOf(address(this)) >= _totalAmount, "Insufficient balance");
 
         vestingSchedules[_beneficiary] = VestingSchedule({
-            initialized: true,
-            beneficiary: _beneficiary,
             totalAmount: _totalAmount,
             tgePercentage: _tgePercentage,
             startTime: block.timestamp,
             cliffDuration: _cliffDuration * 30 days,
             vestingDuration: _vestingDuration * 30 days,
-            released: tgeAmount
+            released: tgeAmount,
+            initialized: true
         });
 
         if (tgeAmount > 0) {
@@ -69,13 +64,10 @@ contract TokenVesting is AccessControl {
     }
 
     function release(address _beneficiary) external {
-        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
-        require(schedule.initialized, "No vesting schedule found");
-
         uint256 releasable = _getReleasableAmount(_beneficiary);
-        require(releasable >= MINIMUM_TRANSFER, "Amount too small");
+        require(releasable > 0, "Nothing to release");
 
-        schedule.released += releasable;
+        vestingSchedules[_beneficiary].released += releasable;
         require(token.transfer(_beneficiary, releasable), "Transfer failed");
 
         emit TokensReleased(_beneficiary, releasable);
@@ -85,32 +77,30 @@ contract TokenVesting is AccessControl {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         if (!schedule.initialized) return 0;
 
-        // Get TGE amount
-        uint256 tgeAmount = (schedule.totalAmount * schedule.tgePercentage) / 1000;
-
-        // If no vesting (100% TGE), return total amount
         if (schedule.tgePercentage == 1000) {
             return schedule.totalAmount;
         }
 
-        // During cliff period, only TGE amount is vested
+        uint256 tgeAmount = (schedule.totalAmount * schedule.tgePercentage) / 1000;
+
         if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
             return tgeAmount;
         }
 
-        // After vesting period, all tokens are vested
         if (block.timestamp >= schedule.startTime + schedule.cliffDuration + schedule.vestingDuration) {
             return schedule.totalAmount;
         }
 
-        // During vesting period, calculate linear vesting
-        uint256 vestingAmount = schedule.totalAmount - tgeAmount;
         uint256 timeFromStart = block.timestamp - (schedule.startTime + schedule.cliffDuration);
+        uint256 vestingAmount = schedule.totalAmount - tgeAmount;
         uint256 vestedVestingAmount = (vestingAmount * timeFromStart) / schedule.vestingDuration;
 
-        // Cap vested amount to total amount
         uint256 totalVested = tgeAmount + vestedVestingAmount;
         return totalVested > schedule.totalAmount ? schedule.totalAmount : totalVested;
+    }
+
+    function getReleasableAmount(address _beneficiary) external view returns (uint256) {
+        return _getReleasableAmount(_beneficiary);
     }
 
     function _getReleasableAmount(address _beneficiary) private view returns (uint256) {
@@ -118,13 +108,6 @@ contract TokenVesting is AccessControl {
         if (!schedule.initialized) return 0;
 
         uint256 vested = getVestedAmount(_beneficiary);
-        if (vested <= schedule.released) {
-            return 0;
-        }
-        return vested - schedule.released;
-    }
-
-    function getReleasableAmount(address _beneficiary) external view returns (uint256) {
-        return _getReleasableAmount(_beneficiary);
+        return vested > schedule.released ? vested - schedule.released : 0;
     }
 }

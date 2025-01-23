@@ -218,16 +218,16 @@ describe("Novastro Token and Vesting", function () {
             });
 
             it("Should not allow TGE percentage > 100%", async function () {
-                const randomAddr = ethers.Wallet.createRandom().address;
-                await expect(
-                    vesting.createVestingSchedule(
-                        randomAddr,
-                        BigInt(ethers.parseEther("150000000")),
-                        1001n, // 100.1% TGE
-                        0n,
-                        0n
-                    )
-                ).to.be.revertedWith("TGE percentage must be <= 100%");
+                const amount = BigInt(ethers.parseEther("150000000"));
+                await token.connect(owner).transfer(await vesting.getAddress(), amount);
+
+                await expect(vesting.createVestingSchedule(
+                    await airdrop.getAddress(),
+                    amount,
+                    1001n,
+                    0n,
+                    0n
+                )).to.be.revertedWith("TGE percentage > 100%");
             });
         });
 
@@ -282,36 +282,28 @@ describe("Novastro Token and Vesting", function () {
             });
 
             it("Should not allow creating vesting schedule twice for same address", async function () {
-                const randomAddr = ethers.Wallet.createRandom().address;
-                const vestingAddr = await vesting.getAddress();
-                const amount = ethers.parseEther("1000");
+                const amount = BigInt(ethers.parseEther("140000000"));
+                await token.connect(owner).transfer(await vesting.getAddress(), amount);
 
-                // Create first vesting schedule
-                await token.connect(owner).transfer(vestingAddr, amount);
                 await vesting.createVestingSchedule(
-                    randomAddr,
+                    await marketing.getAddress(),
                     amount,
+                    225n,
                     0n,
-                    1n,
-                    12n
+                    24n
                 );
 
-                // Try to create second vesting schedule with same address
-                await expect(
-                    vesting.createVestingSchedule(
-                        randomAddr,
-                        amount,
-                        0n,
-                        1n,
-                        12n
-                    )
-                ).to.be.revertedWith("Vesting schedule exists");
+                await expect(vesting.createVestingSchedule(
+                    await marketing.getAddress(),
+                    amount,
+                    225n,
+                    0n,
+                    24n
+                )).to.be.revertedWith("Schedule exists");
             });
 
             it("Should not release tokens if none are due", async function () {
-                await expect(
-                    vesting.release(await seed.getAddress())
-                ).to.be.revertedWith("No vesting schedule found");
+                await expect(vesting.release(await seed.getAddress())).to.be.revertedWith("Nothing to release");
             });
         });
     });
