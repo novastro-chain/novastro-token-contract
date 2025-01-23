@@ -18,7 +18,7 @@ async function main() {
   async function checkVestingSchedule(address) {
     const schedule = await vesting.vestingSchedules(address);
     const vested = await vesting.getVestedAmount(address);
-    const released = await vesting.released(address);
+    const released = schedule.released;
     const balance = await token.balanceOf(address);
 
     console.log("\nVesting Schedule for", address);
@@ -37,13 +37,14 @@ async function main() {
   // Release tokens for an address
   async function releaseTokens(address) {
     console.log("\nReleasing tokens for", address);
+    const schedule = await vesting.vestingSchedules(address);
     const vested = await vesting.getVestedAmount(address);
-    const released = await vesting.released(address);
+    const released = schedule.released;
     const releasable = vested - released;
 
     if (releasable > 0) {
       console.log("Releasable amount:", formatAmount(releasable));
-      const tx = await vesting.release(address);
+      const tx = await vesting.release();
       await tx.wait();
       console.log("✓ Tokens released successfully");
     } else {
@@ -51,10 +52,12 @@ async function main() {
     }
   }
 
-  // Example usage:
-  // const addressToCheck = "BENEFICIARY_ADDRESS";
-  // await checkVestingSchedule(addressToCheck);
-  // await releaseTokens(addressToCheck);
+  // Example: Check schedule for an address
+  const addressToCheck = "BENEFICIARY_ADDRESS";
+  await checkVestingSchedule(addressToCheck);
+
+  // Example: Release tokens for an address
+  await releaseTokens(addressToCheck);
 }
 
 main()
