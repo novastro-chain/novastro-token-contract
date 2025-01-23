@@ -80,9 +80,6 @@ describe("Novastro Token and Vesting", function () {
         const TokenVestingFactory = await ethers.getContractFactory("TokenVesting", owner);
         vesting = await TokenVestingFactory.deploy(await token.getAddress());
 
-        // Set vesting contract
-        await token.setVestingContract(await vesting.getAddress(), true);
-
         // Create vesting schedules and transfer tokens
         for (const [key, allocation] of Object.entries(ALLOCATIONS)) {
             const total = BigInt(ethers.parseEther(allocation.total));
@@ -95,6 +92,7 @@ describe("Novastro Token and Vesting", function () {
             }
 
             // Transfer tokens to vesting contract first
+            await token.connect(owner).approve(await vesting.getAddress(), total);
             await token.connect(owner).transfer(await vesting.getAddress(), total);
 
             // Then create vesting schedule
@@ -186,7 +184,7 @@ describe("Novastro Token and Vesting", function () {
                         0n,
                         0n
                     )
-                ).to.be.revertedWith("TGE percentage must be less than or equal to 100%");
+                ).to.be.revertedWith("TGE percentage must be <= 100%");
             });
         });
 
@@ -210,34 +208,71 @@ describe("Novastro Token and Vesting", function () {
         });
 
         describe("Edge Cases and Security", function () {
+            beforeEach(async function () {
+                // Deploy fresh contracts for these tests
+                const NovastroTokenFactory = await ethers.getContractFactory("NovastroToken", owner);
+                token = await NovastroTokenFactory.deploy();
+
+                const TokenVestingFactory = await ethers.getContractFactory("TokenVesting", owner);
+                vesting = await TokenVestingFactory.deploy(await token.getAddress());
+            });
+
             it("Should not allow non-owner to create vesting schedule", async function () {
                 await expect(
                     vesting.connect(seed).createVestingSchedule(
-                        await seed.getAddress(),
-                        BigInt(ethers.parseEther("1000")),
+                        ethers.Wallet.createRandom().address,
+                        ethers.parseEther("1000000"),
                         0n,
-                        1n,
+                        0n,
                         12n
                     )
-                ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount");
+                ).to.be.revertedWithCustomError(vesting, "AccessControlUnauthorizedAccount");
             });
 
             it("Should not allow creating vesting schedule twice for same address", async function () {
+                const randomAddr = ethers.Wallet.createRandom().address;
+                const vestingAddr = await vesting.getAddress();
+                const amount = ethers.parseEther("1000");
+
+                // Create first vesting schedule
+                await token.connect(owner).transfer(vestingAddr, amount);
+                await vesting.createVestingSchedule(
+                    randomAddr,
+                    amount,
+                    0n,
+                    1n,
+                    12n
+                );
+
+                // Try to create second vesting schedule with same address
                 await expect(
                     vesting.createVestingSchedule(
-                        await seed.getAddress(),
-                        BigInt(ethers.parseEther("1000")),
+                        randomAddr,
+                        amount,
                         0n,
                         1n,
                         12n
                     )
-                ).to.be.revertedWith("Vesting schedule already exists");
+                ).to.be.revertedWith("Vesting schedule exists");
             });
 
             it("Should not release tokens if none are due", async function () {
-                await time.increase(1);
-                const releasable = await vesting.getReleasableAmount(await seed.getAddress());
-                expect(releasable).to.equal(0);
+                const beneficiary = await seed.getAddress();
+                const amount = ethers.parseEther("1000");
+
+                // Create vesting schedule with no TGE
+                await token.connect(owner).transfer(await vesting.getAddress(), amount);
+                await vesting.createVestingSchedule(
+                    beneficiary,
+                    amount,
+                    0n, // 0% TGE
+                    1n, // 1 month cliff
+                    12n // 12 month vesting
+                );
+
+                await expect(
+                    vesting.release(beneficiary)
+                ).to.be.revertedWith("Amount too small");
             });
         });
     });

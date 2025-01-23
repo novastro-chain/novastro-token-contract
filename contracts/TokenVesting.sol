@@ -2,9 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract TokenVesting is Ownable {
+contract TokenVesting is AccessControl {
+    bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
+    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
+    uint256 private constant MINIMUM_TRANSFER = 1000; // Minimum transfer amount
+    bool private _paused;
+
     struct VestingSchedule {
         address beneficiary;
         uint256 totalAmount;
@@ -16,17 +21,28 @@ contract TokenVesting is Ownable {
         bool initialized;
     }
 
-    IERC20 public immutable token;  // Fixed order of modifiers
+    IERC20 public immutable token;
     
-    // Mapping from beneficiary address to vesting schedule
     mapping(address => VestingSchedule) public vestingSchedules;
     
     event VestingScheduleCreated(address indexed beneficiary, uint256 totalAmount, uint256 tgePercentage);
     event TokensReleased(address indexed beneficiary, uint256 amount);
+    event EmergencyWithdraw(address indexed token, uint256 amount);
+    event ERC20Recovered(address indexed token, address indexed to, uint256 amount);
+    event Paused(address account);
+    event Unpaused(address account);
     
-    constructor(address _token) Ownable(msg.sender) {
+    modifier whenNotPaused() {
+        require(!_paused, "Contract is paused");
+        _;
+    }
+
+    constructor(address _token) {
         require(_token != address(0), "Token address cannot be 0");
         token = IERC20(_token);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(VESTING_MANAGER_ROLE, msg.sender);
+        _grantRole(EMERGENCY_ROLE, msg.sender);
     }
     
     function createVestingSchedule(
@@ -35,17 +51,15 @@ contract TokenVesting is Ownable {
         uint256 _tgePercentage,
         uint256 _cliffDuration,
         uint256 _vestingDuration
-    ) external onlyOwner {
+    ) external whenNotPaused onlyRole(VESTING_MANAGER_ROLE) {
         require(_beneficiary != address(0), "Beneficiary address cannot be 0");
-        require(_totalAmount > 0, "Total amount must be greater than 0");
-        require(!vestingSchedules[_beneficiary].initialized, "Vesting schedule already exists");
-        require(_tgePercentage <= 1000, "TGE percentage must be less than or equal to 100%");
-        require(_vestingDuration > 0 || _tgePercentage == 1000, "Vesting duration must be greater than 0");
+        require(_totalAmount > MINIMUM_TRANSFER, "Amount too small");
+        require(!vestingSchedules[_beneficiary].initialized, "Vesting schedule exists");
+        require(_tgePercentage <= 1000, "TGE percentage must be <= 100%");
+        require(_vestingDuration > 0 || _tgePercentage == 1000, "Invalid vesting duration");
 
         uint256 tgeAmount = (_totalAmount * _tgePercentage) / 1000;
-
-        // Check if contract has enough balance
-        require(IERC20(token).balanceOf(address(this)) >= _totalAmount, "Insufficient balance");
+        require(token.balanceOf(address(this)) >= _totalAmount, "Insufficient balance");
 
         vestingSchedules[_beneficiary] = VestingSchedule({
             initialized: true,
@@ -55,28 +69,52 @@ contract TokenVesting is Ownable {
             startTime: block.timestamp,
             cliffDuration: _cliffDuration * 30 days,
             vestingDuration: _vestingDuration * 30 days,
-            released: 0
+            released: tgeAmount
         });
 
         if (tgeAmount > 0) {
-            vestingSchedules[_beneficiary].released = tgeAmount;
-            IERC20(token).transfer(_beneficiary, tgeAmount);
+            require(token.transfer(_beneficiary, tgeAmount), "TGE transfer failed");
         }
-
+        
         emit VestingScheduleCreated(_beneficiary, _totalAmount, _tgePercentage);
     }
 
-    function release(address _beneficiary) external {
+    function release(address _beneficiary) external whenNotPaused {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.initialized, "No vesting schedule found");
 
         uint256 releasable = _getReleasableAmount(_beneficiary);
-        require(releasable > 0, "No tokens are due for release");
+        require(releasable >= MINIMUM_TRANSFER, "Amount too small");
 
         schedule.released += releasable;
-        require(IERC20(token).transfer(_beneficiary, releasable), "Token transfer failed");
+        require(token.transfer(_beneficiary, releasable), "Transfer failed");
 
         emit TokensReleased(_beneficiary, releasable);
+    }
+
+    function emergencyWithdraw() external onlyRole(EMERGENCY_ROLE) {
+        uint256 balance = token.balanceOf(address(this));
+        require(balance > 0, "No tokens to withdraw");
+        require(token.transfer(msg.sender, balance), "Withdraw failed");
+        emit EmergencyWithdraw(address(token), balance);
+    }
+
+    function recoverERC20(address tokenAddress, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(tokenAddress != address(token), "Cannot recover vesting token");
+        IERC20(tokenAddress).transfer(msg.sender, amount);
+        emit ERC20Recovered(tokenAddress, msg.sender, amount);
+    }
+
+    function pause() external onlyRole(EMERGENCY_ROLE) {
+        require(!_paused, "Already paused");
+        _paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_paused, "Not paused");
+        _paused = false;
+        emit Unpaused(msg.sender);
     }
 
     function getVestedAmount(address _beneficiary) public view returns (uint256) {
