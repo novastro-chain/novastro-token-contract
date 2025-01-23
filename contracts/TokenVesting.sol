@@ -2,12 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract TokenVesting is Ownable {
+contract TokenVesting is AccessControl {
+    bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
+
     struct VestingSchedule {
         uint256 totalAmount;
-        uint256 tgeAmount;
+        uint256 tgePercentage;
         uint256 cliffDuration;
         uint256 vestingDuration;
         uint256 startTime;
@@ -15,62 +17,58 @@ contract TokenVesting is Ownable {
         bool initialized;
     }
 
-    IERC20 public token;
-    
-    // Mapping from beneficiary address to vesting schedule
+    IERC20 public immutable token;
     mapping(address => VestingSchedule) public vestingSchedules;
-
-    event TokensReleased(address beneficiary, uint256 amount);
-    event VestingScheduleCreated(address beneficiary, uint256 totalAmount);
-
-    constructor(address _token) Ownable(msg.sender) {
+    
+    event VestingScheduleCreated(address indexed beneficiary, uint256 totalAmount, uint256 tgePercentage);
+    event TokensReleased(address indexed beneficiary, uint256 amount);
+    
+    constructor(address _token) {
         require(_token != address(0), "Token address cannot be 0");
         token = IERC20(_token);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(VESTING_MANAGER_ROLE, msg.sender);
     }
-
+    
     function createVestingSchedule(
         address _beneficiary,
         uint256 _totalAmount,
-        uint256 _tgePercentage, // Percentage * 10 (e.g., 225 for 22.5%)
-        uint256 _cliffMonths,
-        uint256 _vestingMonths
-    ) external onlyOwner {
-        require(_beneficiary != address(0), "Beneficiary address cannot be 0");
-        require(_totalAmount > 0, "Total amount must be greater than 0");
-        require(!vestingSchedules[_beneficiary].initialized, "Vesting schedule already exists");
+        uint256 _tgePercentage,
+        uint256 _cliffDuration,
+        uint256 _vestingDuration
+    ) external onlyRole(VESTING_MANAGER_ROLE) {
+        require(_beneficiary != address(0), "Beneficiary cannot be 0");
+        require(!vestingSchedules[_beneficiary].initialized, "Schedule exists");
+        require(_tgePercentage <= 1000, "TGE percentage > 100%");
+        require(_vestingDuration > 0 || _tgePercentage == 1000, "Invalid duration");
+        require(_cliffDuration <= _vestingDuration, "Cliff > vesting");
 
-        uint256 tgeAmount = (_totalAmount * _tgePercentage) / 1000; // Divide by 1000 since percentage is multiplied by 10
-        uint256 cliffDuration = _cliffMonths * 30 days;
-        uint256 vestingDuration = _vestingMonths * 30 days;
+        uint256 tgeAmount = (_totalAmount * _tgePercentage) / 1000;
+        require(token.balanceOf(address(this)) >= _totalAmount, "Insufficient balance");
 
         vestingSchedules[_beneficiary] = VestingSchedule({
             totalAmount: _totalAmount,
-            tgeAmount: tgeAmount,
-            cliffDuration: cliffDuration,
-            vestingDuration: vestingDuration,
+            tgePercentage: _tgePercentage,
             startTime: block.timestamp,
-            released: 0,
+            cliffDuration: _cliffDuration * 30 days,
+            vestingDuration: _vestingDuration * 30 days,
+            released: tgeAmount,
             initialized: true
         });
 
-        // Transfer TGE tokens immediately if any
         if (tgeAmount > 0) {
-            require(token.transfer(_beneficiary, tgeAmount), "Token transfer failed");
-            vestingSchedules[_beneficiary].released = tgeAmount;
+            require(token.transfer(_beneficiary, tgeAmount), "TGE transfer failed");
         }
-
-        emit VestingScheduleCreated(_beneficiary, _totalAmount);
+        
+        emit VestingScheduleCreated(_beneficiary, _totalAmount, _tgePercentage);
     }
 
     function release(address _beneficiary) external {
-        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
-        require(schedule.initialized, "No vesting schedule found");
-
         uint256 releasable = _getReleasableAmount(_beneficiary);
-        require(releasable > 0, "No tokens are due for release");
+        require(releasable > 0, "Nothing to release");
 
-        schedule.released += releasable;
-        require(token.transfer(_beneficiary, releasable), "Token transfer failed");
+        vestingSchedules[_beneficiary].released += releasable;
+        require(token.transfer(_beneficiary, releasable), "Transfer failed");
 
         emit TokensReleased(_beneficiary, releasable);
     }
@@ -79,8 +77,14 @@ contract TokenVesting is Ownable {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         if (!schedule.initialized) return 0;
 
+        if (schedule.tgePercentage == 1000) {
+            return schedule.totalAmount;
+        }
+
+        uint256 tgeAmount = (schedule.totalAmount * schedule.tgePercentage) / 1000;
+
         if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
-            return schedule.tgeAmount;
+            return tgeAmount;
         }
 
         if (block.timestamp >= schedule.startTime + schedule.cliffDuration + schedule.vestingDuration) {
@@ -88,17 +92,22 @@ contract TokenVesting is Ownable {
         }
 
         uint256 timeFromStart = block.timestamp - (schedule.startTime + schedule.cliffDuration);
-        uint256 vestedAmount = schedule.tgeAmount + 
-            ((schedule.totalAmount - schedule.tgeAmount) * timeFromStart) / schedule.vestingDuration;
+        uint256 vestingAmount = schedule.totalAmount - tgeAmount;
+        uint256 vestedVestingAmount = (vestingAmount * timeFromStart) / schedule.vestingDuration;
 
-        return vestedAmount;
-    }
-
-    function _getReleasableAmount(address _beneficiary) private view returns (uint256) {
-        return getVestedAmount(_beneficiary) - vestingSchedules[_beneficiary].released;
+        uint256 totalVested = tgeAmount + vestedVestingAmount;
+        return totalVested > schedule.totalAmount ? schedule.totalAmount : totalVested;
     }
 
     function getReleasableAmount(address _beneficiary) external view returns (uint256) {
         return _getReleasableAmount(_beneficiary);
+    }
+
+    function _getReleasableAmount(address _beneficiary) private view returns (uint256) {
+        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
+        if (!schedule.initialized) return 0;
+
+        uint256 vested = getVestedAmount(_beneficiary);
+        return vested > schedule.released ? vested - schedule.released : 0;
     }
 }
