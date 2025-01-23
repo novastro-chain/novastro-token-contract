@@ -6,12 +6,67 @@ describe("Novastro Token and Vesting", function () {
     let token;
     let vesting;
     let owner;
-    let seed;
-    let airdrop;
-    let marketing;
+    let seed, team, marketing, dev, ecosystem, treasury, liquidity, airdrop, advisors;
+
+    const ALLOCATIONS = {
+        SEED: {
+            total: "70000000",      // 7%
+            tgePercent: 0n,         // 0% TGE
+            cliff: 3n,              // 3 months cliff
+            vesting: 18n            // 18 months vesting
+        },
+        TEAM: {
+            total: "75000000",      // 7.5%
+            tgePercent: 0n,         // 0% TGE
+            cliff: 12n,             // 12 months cliff
+            vesting: 24n            // 24 months vesting
+        },
+        MARKETING: {
+            total: "140000000",     // 14%
+            tgePercent: 225n,       // 22.5% TGE
+            cliff: 0n,
+            vesting: 24n            // 24 months vesting
+        },
+        DEV: {
+            total: "140000000",     // 14%
+            tgePercent: 225n,       // 22.5% TGE
+            cliff: 0n,
+            vesting: 36n            // 36 months vesting
+        },
+        ECOSYSTEM: {
+            total: "175000000",     // 17.5%
+            tgePercent: 225n,       // 22.5% TGE
+            cliff: 0n,
+            vesting: 48n            // 48 months vesting
+        },
+        TREASURY: {
+            total: "150000000",     // 15%
+            tgePercent: 0n,         // 0% TGE
+            cliff: 0n,
+            vesting: 36n            // 36 months vesting
+        },
+        AIRDROP: {
+            total: "150000000",     // 15%
+            tgePercent: 1000n,      // 100% TGE
+            cliff: 0n,
+            vesting: 0n
+        },
+        LIQUIDITY: {
+            total: "50000000",      // 5%
+            tgePercent: 1000n,      // 100% TGE
+            cliff: 0n,
+            vesting: 0n
+        },
+        ADVISORS: {
+            total: "50000000",      // 5%
+            tgePercent: 0n,         // 0% TGE
+            cliff: 10n,             // 10 months cliff
+            vesting: 12n            // 12 months vesting
+        }
+    };
 
     beforeEach(async function () {
-        [owner, seed, airdrop, marketing] = await ethers.getSigners();
+        [owner, seed, team, marketing, dev, ecosystem, treasury, liquidity, airdrop, advisors] = await ethers.getSigners();
 
         const NovastroTokenFactory = await ethers.getContractFactory("NovastroToken", owner);
         token = await NovastroTokenFactory.deploy();
@@ -26,50 +81,102 @@ describe("Novastro Token and Vesting", function () {
             expect(totalSupply).to.equal(BigInt(ethers.parseEther("1000000000")));
         });
 
-        it("Should distribute TGE tokens correctly", async function () {
-            const distributions = {
-                seed: {
-                    amount: BigInt(ethers.parseEther("70000000")),
-                    tge: 100n, // 10%
-                    cliff: 6n,
-                    vesting: 18n
-                },
-                airdrop: {
-                    amount: BigInt(ethers.parseEther("150000000")),
-                    tge: 1000n, // 100%
-                    cliff: 0n,
-                    vesting: 0n
-                },
-                marketing: {
-                    amount: BigInt(ethers.parseEther("140000000")),
-                    tge: 200n, // 20%
-                    cliff: 0n,
-                    vesting: 12n
-                }
-            };
-
+        it("Should have correct token allocations and TGE amounts", async function () {
+            let totalAllocation = 0n;
             let totalTGEAmount = 0n;
             let totalVestingAmount = 0n;
-            const totalSupply = BigInt(ethers.parseEther("1000000000"));
 
-            for (const [key, value] of Object.entries(distributions)) {
-                const tgeAmount = (value.amount * value.tge) / 1000n;
+            for (const [role, allocation] of Object.entries(ALLOCATIONS)) {
+                const amount = BigInt(ethers.parseEther(allocation.total));
+                const tgeAmount = (amount * allocation.tgePercent) / 1000n;
+                
+                totalAllocation += amount;
                 totalTGEAmount += tgeAmount;
-                totalVestingAmount += value.amount - tgeAmount;
+                totalVestingAmount += amount - tgeAmount;
+
+                // For 100% TGE allocations, transfer directly
+                if (allocation.tgePercent === 1000n) {
+                    const recipient = eval(role.toLowerCase());
+                    await token.connect(owner).transfer(recipient.address, amount);
+                    const balance = await token.balanceOf(recipient.address);
+                    expect(balance).to.equal(amount);
+                    continue;
+                }
+
+                // For vesting allocations, create vesting schedule
+                const recipient = eval(role.toLowerCase());
+                await token.connect(owner).transfer(await vesting.getAddress(), amount);
+                await vesting.createVestingSchedule(
+                    recipient.address,
+                    amount,
+                    allocation.tgePercent,
+                    allocation.cliff,
+                    allocation.vesting
+                );
+
+                // Verify TGE amount if any
+                if (allocation.tgePercent > 0n) {
+                    const balance = await token.balanceOf(recipient.address);
+                    const expectedTGE = (amount * allocation.tgePercent) / 1000n;
+                    expect(balance).to.equal(expectedTGE);
+                }
             }
 
-            const tgePercentage = (totalTGEAmount * 10000n) / totalSupply;
-            const vestingPercentage = (totalVestingAmount * 10000n) / totalSupply;
+            // Verify total allocations
+            const totalSupply = BigInt(ethers.parseEther("1000000000"));
+            expect(totalAllocation).to.equal(totalSupply);
 
-            console.log("TGE Percentage:", (tgePercentage / 100n).toString(), "%");
-            console.log("Vesting Percentage:", (vestingPercentage / 100n).toString(), "%");
+            // Log distribution percentages
+            console.log("TGE Amount:", ethers.formatEther(totalTGEAmount), "tokens");
+            console.log("Vesting Amount:", ethers.formatEther(totalVestingAmount), "tokens");
+            console.log("TGE Percentage:", Number(totalTGEAmount * 10000n / totalSupply) / 100, "%");
+            console.log("Vesting Percentage:", Number(totalVestingAmount * 10000n / totalSupply) / 100, "%");
         });
 
-        it("Should send correct amount to vesting contract", async function () {
-            const totalVestingAmount = BigInt(ethers.parseEther("360000000")); // 360M tokens for vesting
-            await token.connect(owner).transfer(await vesting.getAddress(), totalVestingAmount);
-            const vestingBalance = await token.balanceOf(await vesting.getAddress());
-            expect(vestingBalance).to.equal(totalVestingAmount);
+        it("Should vest tokens correctly after cliff", async function () {
+            // Setup all vesting schedules first
+            for (const [role, allocation] of Object.entries(ALLOCATIONS)) {
+                if (allocation.tgePercent === 1000n) continue;
+
+                const amount = BigInt(ethers.parseEther(allocation.total));
+                const recipient = eval(role.toLowerCase());
+                await token.connect(owner).transfer(await vesting.getAddress(), amount);
+                await vesting.createVestingSchedule(
+                    recipient.address,
+                    amount,
+                    allocation.tgePercent,
+                    allocation.cliff,
+                    allocation.vesting
+                );
+            }
+
+            // Test vesting after 6 months
+            await time.increase(180 * 24 * 60 * 60); // 6 months
+
+            // Check each allocation
+            for (const [role, allocation] of Object.entries(ALLOCATIONS)) {
+                if (allocation.tgePercent === 1000n) continue;
+
+                const recipient = eval(role.toLowerCase());
+                const amount = BigInt(ethers.parseEther(allocation.total));
+                const tgeAmount = (amount * allocation.tgePercent) / 1000n;
+                const vestingAmount = amount - tgeAmount;
+
+                // Calculate expected vested amount
+                let expectedVested = tgeAmount;
+                if (allocation.cliff <= 6n) {
+                    const vestedMonths = 6n - allocation.cliff;
+                    if (vestedMonths > 0n) {
+                        expectedVested += (vestingAmount * vestedMonths) / allocation.vesting;
+                    }
+                }
+
+                const vested = await vesting.getVestedAmount(recipient.address);
+                // Check if vested amount is within 0.01% of expected
+                const difference = vested > expectedVested ? vested - expectedVested : expectedVested - vested;
+                const maxDifference = expectedVested / 10000n; // 0.01%
+                expect(difference).to.be.lte(maxDifference);
+            }
         });
     });
 
@@ -82,8 +189,8 @@ describe("Novastro Token and Vesting", function () {
                 await vesting.createVestingSchedule(
                     await seed.getAddress(),
                     amount,
-                    100n, // 10% TGE
-                    6n, // 6 months cliff
+                    0n, // 0% TGE
+                    3n, // 3 months cliff
                     18n // 18 months vesting
                 );
             });
@@ -95,7 +202,7 @@ describe("Novastro Token and Vesting", function () {
 
             it("Should start vesting after cliff", async function () {
                 // Move past cliff period and some vesting duration
-                await time.increase(210 * 24 * 60 * 60); // 7 months (6 months cliff + 1 month vesting)
+                await time.increase(210 * 24 * 60 * 60); // 7 months (3 months cliff + 4 months vesting)
                 const releasable = await vesting.getReleasableAmount(await seed.getAddress());
                 expect(releasable).to.be.gt(0n);
             });
@@ -104,15 +211,7 @@ describe("Novastro Token and Vesting", function () {
         describe("Airdrop (150M tokens)", function () {
             it("Should release 100% tokens at TGE", async function () {
                 const amount = BigInt(ethers.parseEther("150000000"));
-                await token.connect(owner).transfer(await vesting.getAddress(), amount);
-
-                await vesting.createVestingSchedule(
-                    await airdrop.getAddress(),
-                    amount,
-                    1000n, // 100% TGE
-                    0n,
-                    0n
-                );
+                await token.connect(owner).transfer(await airdrop.getAddress(), amount);
 
                 const balance = await token.balanceOf(await airdrop.getAddress());
                 expect(balance).to.equal(amount);
@@ -140,15 +239,15 @@ describe("Novastro Token and Vesting", function () {
                 await vesting.createVestingSchedule(
                     await marketing.getAddress(),
                     amount,
-                    200n, // 20% TGE
+                    225n, // 22.5% TGE
                     0n,
-                    12n // 12 months vesting
+                    24n // 24 months vesting
                 );
             });
 
             it("Should release correct TGE amount", async function () {
                 const totalAmount = BigInt(ethers.parseEther("140000000"));
-                const expectedTGE = (totalAmount * 200n) / 1000n; // 20%
+                const expectedTGE = (totalAmount * 225n) / 1000n; // 22.5%
                 const balance = await token.balanceOf(await marketing.getAddress());
                 expect(balance).to.equal(expectedTGE);
             });

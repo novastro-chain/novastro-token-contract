@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract TokenVesting is AccessControl {
     bytes32 public constant VESTING_MANAGER_ROLE = keccak256("VESTING_MANAGER_ROLE");
-    bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
     uint256 private constant MINIMUM_TRANSFER = 1000; // Minimum transfer amount
 
     struct VestingSchedule {
@@ -26,15 +25,12 @@ contract TokenVesting is AccessControl {
     
     event VestingScheduleCreated(address indexed beneficiary, uint256 totalAmount, uint256 tgePercentage);
     event TokensReleased(address indexed beneficiary, uint256 amount);
-    event EmergencyWithdraw(address indexed token, uint256 amount);
-    event ERC20Recovered(address indexed token, address indexed to, uint256 amount);
-
+    
     constructor(address _token) {
         require(_token != address(0), "Token address cannot be 0");
         token = IERC20(_token);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(VESTING_MANAGER_ROLE, msg.sender);
-        _grantRole(EMERGENCY_ROLE, msg.sender);
     }
     
     function createVestingSchedule(
@@ -49,6 +45,7 @@ contract TokenVesting is AccessControl {
         require(!vestingSchedules[_beneficiary].initialized, "Vesting schedule exists");
         require(_tgePercentage <= 1000, "TGE percentage must be <= 100%");
         require(_vestingDuration > 0 || _tgePercentage == 1000, "Invalid vesting duration");
+        require(_cliffDuration <= _vestingDuration, "Cliff longer than vesting");
 
         uint256 tgeAmount = (_totalAmount * _tgePercentage) / 1000;
         require(token.balanceOf(address(this)) >= _totalAmount, "Insufficient balance");
@@ -84,19 +81,6 @@ contract TokenVesting is AccessControl {
         emit TokensReleased(_beneficiary, releasable);
     }
 
-    function emergencyWithdraw() external onlyRole(EMERGENCY_ROLE) {
-        uint256 balance = token.balanceOf(address(this));
-        require(balance > 0, "No tokens to withdraw");
-        require(token.transfer(msg.sender, balance), "Withdraw failed");
-        emit EmergencyWithdraw(address(token), balance);
-    }
-
-    function recoverERC20(address tokenAddress, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(tokenAddress != address(token), "Cannot recover vesting token");
-        IERC20(tokenAddress).transfer(msg.sender, amount);
-        emit ERC20Recovered(tokenAddress, msg.sender, amount);
-    }
-
     function getVestedAmount(address _beneficiary) public view returns (uint256) {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         if (!schedule.initialized) return 0;
@@ -111,7 +95,7 @@ contract TokenVesting is AccessControl {
 
         // During cliff period, only TGE amount is vested
         if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
-            return schedule.tgePercentage > 0 ? schedule.released : 0;
+            return tgeAmount;
         }
 
         // After vesting period, all tokens are vested
@@ -126,26 +110,12 @@ contract TokenVesting is AccessControl {
 
         // Cap vested amount to total amount
         uint256 totalVested = tgeAmount + vestedVestingAmount;
-        if (totalVested > schedule.totalAmount) {
-            return schedule.totalAmount;
-        }
-        return totalVested;
+        return totalVested > schedule.totalAmount ? schedule.totalAmount : totalVested;
     }
 
     function _getReleasableAmount(address _beneficiary) private view returns (uint256) {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         if (!schedule.initialized) return 0;
-
-        // During cliff period, only TGE amount is releasable
-        if (block.timestamp < schedule.startTime + schedule.cliffDuration) {
-            if (schedule.tgePercentage == 0) {
-                return 0;
-            }
-            if (schedule.released >= (schedule.totalAmount * schedule.tgePercentage) / 1000) {
-                return 0;
-            }
-            return (schedule.totalAmount * schedule.tgePercentage) / 1000 - schedule.released;
-        }
 
         uint256 vested = getVestedAmount(_beneficiary);
         if (vested <= schedule.released) {
