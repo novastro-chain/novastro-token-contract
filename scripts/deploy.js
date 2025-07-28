@@ -10,14 +10,14 @@ async function main() {
   await token.waitForDeployment();
   const tokenAddress = await token.getAddress();
   console.log("NovastroToken deployed to:", tokenAddress);
-
+/*
   // Deploy TokenVesting
   const TokenVesting = await ethers.getContractFactory("TokenVesting");
   const vesting = await TokenVesting.deploy(tokenAddress);
   await vesting.waitForDeployment();
   const vestingAddress = await vesting.getAddress();
   console.log("TokenVesting deployed to:", vestingAddress);
-
+*/
   // Transfer tokens to vesting contract
   const totalSupply = await token.totalSupply();
   console.log("Transferring tokens to vesting contract...");
