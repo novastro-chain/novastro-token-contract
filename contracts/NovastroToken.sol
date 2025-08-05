@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 contract NovastroToken is ERC20, AccessControl {
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10**18; // 1 billion tokens
 
-    constructor() ERC20("NOVASTRO", "NOVAS") {
+    constructor() ERC20("XNL", "XNL") {
         _mint(msg.sender, TOTAL_SUPPLY);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
     }
